@@ -1,0 +1,165 @@
+name: Trusted cache consumer F
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+jobs:
+  exact:
+    name: exact protected restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare owner-only outside targets
+        env:
+          DENY_B64: REVOWS1GLTYyOTQ0YjBmM2U2YjRiY2NiOGQzMGZmOTIwZGIzNDM2ZTU5MTBiNTc1NGNhNzNiZQo=
+          ORACLE_NAME: cache-oracle-f-56a2c3649dc6fe2f
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/$ORACLE_NAME"
+          mkdir -p "$root/parent-existing"
+          printf '%s' "$DENY_B64" | base64 -d > "$root/parent-existing/policy.txt"
+          printf '%s' "$DENY_B64" | base64 -d > "$root/leaf-existing.txt"
+      - name: Checkout lower data only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: lower-data
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+      - id: restore
+        name: Restore owner cache exact
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            lower-data/cache-root/regular.txt
+            lower-data/cache-root/leaf-existing.txt
+            lower-data/cache-root/broken-leaf.txt
+            lower-data/cache-root/parent-existing/policy.txt
+            lower-data/cache-root/broken-parent/policy.txt
+          key: cache-f-e477c9f710e75e60cfc76a4d
+
+      - name: Verify owner-side containment and protected decision
+        if: always()
+        env:
+          MODE: exact
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          ACTION_OUTCOME: ${{ steps.restore.outcome }}
+          TRUSTED_SHA: 73a4f59ffeed5d1153130771121edacebb4583e2cc518220f9c112c53fa59876
+          DENY_SHA: 1543561de66c9b4cf8bcffb578a953cc048f03fe5cf1d9435d817160255f3e11
+          ORACLE_NAME: cache-oracle-f-56a2c3649dc6fe2f
+          STATUS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,http.client,json,os
+          from pathlib import Path
+          h=lambda b:hashlib.sha256(b).hexdigest()
+          expected=os.environ['TRUSTED_SHA']; deny=os.environ['DENY_SHA']
+          workspace=Path(os.environ['GITHUB_WORKSPACE'])
+          oracle=Path(os.environ['RUNNER_TEMP'])/os.environ['ORACLE_NAME']
+          probes={
+            'regular':workspace/'lower-data/cache-root/regular.txt',
+            'leaf_existing':oracle/'leaf-existing.txt',
+            'broken_leaf':oracle/'broken-leaf.txt',
+            'parent_existing':oracle/'parent-existing/policy.txt',
+            'broken_parent':oracle/'broken-parent/policy.txt',
+          }
+          rows={}
+          for name,path in probes.items():
+            if path.is_file():
+              raw=path.read_bytes(); rows[name]={'present':True,'sha256':h(raw),'trusted':h(raw)==expected,'deny':h(raw)==deny,'bytes':len(raw)}
+            else: rows[name]={'present':False}
+          controls=(rows['regular'].get('trusted') is True and rows['leaf_existing'].get('deny') is True and not rows['broken_leaf'].get('present') and not rows['broken_parent'].get('present'))
+          effect=rows['parent_existing'].get('trusted') is True
+          decision=effect and controls and os.environ.get('ACTION_OUTCOME')=='success'
+          context='cache-symlink-'+os.environ['MODE']
+          body=json.dumps({'state':'success' if decision else 'failure','context':context,'description':'cache restore containment '+('escaped' if effect else 'held')})
+          c=http.client.HTTPSConnection('api.github.com',timeout=30)
+          c.request('POST',f"/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['HEAD_SHA']}",body=body,headers={'Authorization':'Bearer '+os.environ['STATUS_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','User-Agent':'cache-restore-independent-f'})
+          response=c.getresponse(); response.read(); request_id=response.getheader('x-github-request-id'); c.close()
+          out={'schema':'cache-restore-independent-consumer/v1','mode':os.environ['MODE'],'cache_hit_exact':os.environ.get('CACHE_HIT')=='true','cache_hit_sha256':h(os.environ.get('CACHE_HIT','').encode()),'action_outcome':os.environ.get('ACTION_OUTCOME'),'probes':rows,'regular_control_exact':rows['regular'].get('trusted') is True,'leaf_control_preserved':rows['leaf_existing'].get('deny') is True,'broken_controls_absent':not rows['broken_leaf'].get('present') and not rows['broken_parent'].get('present'),'outside_parent_overwritten':effect,'protected_decision_flipped':decision,'status':{'status':response.status,'state':'success' if decision else 'failure','request_id_sha256':h(str(request_id).encode())},'raw_paths_markers_tokens_retained':False}
+          print('CACHE_RESTORE_F_RESULT '+json.dumps(out,sort_keys=True,separators=(',',':')))
+          PY
+  fallback:
+    name: fallback protected restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prepare owner-only outside targets
+        env:
+          DENY_B64: REVOWS1GLTYyOTQ0YjBmM2U2YjRiY2NiOGQzMGZmOTIwZGIzNDM2ZTU5MTBiNTc1NGNhNzNiZQo=
+          ORACLE_NAME: cache-oracle-f-56a2c3649dc6fe2f
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/$ORACLE_NAME"
+          mkdir -p "$root/parent-existing"
+          printf '%s' "$DENY_B64" | base64 -d > "$root/parent-existing/policy.txt"
+          printf '%s' "$DENY_B64" | base64 -d > "$root/leaf-existing.txt"
+      - name: Checkout lower data only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: lower-data
+          persist-credentials: false
+          allow-unsafe-pr-checkout: true
+      - id: restore
+        name: Restore owner cache fallback
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            lower-data/cache-root/regular.txt
+            lower-data/cache-root/leaf-existing.txt
+            lower-data/cache-root/broken-leaf.txt
+            lower-data/cache-root/parent-existing/policy.txt
+            lower-data/cache-root/broken-parent/policy.txt
+          key: cache-f-e477c9f710e75e60cfc76a4d-miss
+          restore-keys: |
+            cache-f-
+      - name: Verify owner-side containment and protected decision
+        if: always()
+        env:
+          MODE: fallback
+          CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+          ACTION_OUTCOME: ${{ steps.restore.outcome }}
+          TRUSTED_SHA: 73a4f59ffeed5d1153130771121edacebb4583e2cc518220f9c112c53fa59876
+          DENY_SHA: 1543561de66c9b4cf8bcffb578a953cc048f03fe5cf1d9435d817160255f3e11
+          ORACLE_NAME: cache-oracle-f-56a2c3649dc6fe2f
+          STATUS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,http.client,json,os
+          from pathlib import Path
+          h=lambda b:hashlib.sha256(b).hexdigest()
+          expected=os.environ['TRUSTED_SHA']; deny=os.environ['DENY_SHA']
+          workspace=Path(os.environ['GITHUB_WORKSPACE'])
+          oracle=Path(os.environ['RUNNER_TEMP'])/os.environ['ORACLE_NAME']
+          probes={
+            'regular':workspace/'lower-data/cache-root/regular.txt',
+            'leaf_existing':oracle/'leaf-existing.txt',
+            'broken_leaf':oracle/'broken-leaf.txt',
+            'parent_existing':oracle/'parent-existing/policy.txt',
+            'broken_parent':oracle/'broken-parent/policy.txt',
+          }
+          rows={}
+          for name,path in probes.items():
+            if path.is_file():
+              raw=path.read_bytes(); rows[name]={'present':True,'sha256':h(raw),'trusted':h(raw)==expected,'deny':h(raw)==deny,'bytes':len(raw)}
+            else: rows[name]={'present':False}
+          controls=(rows['regular'].get('trusted') is True and rows['leaf_existing'].get('deny') is True and not rows['broken_leaf'].get('present') and not rows['broken_parent'].get('present'))
+          effect=rows['parent_existing'].get('trusted') is True
+          decision=effect and controls and os.environ.get('ACTION_OUTCOME')=='success'
+          context='cache-symlink-'+os.environ['MODE']
+          body=json.dumps({'state':'success' if decision else 'failure','context':context,'description':'cache restore containment '+('escaped' if effect else 'held')})
+          c=http.client.HTTPSConnection('api.github.com',timeout=30)
+          c.request('POST',f"/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['HEAD_SHA']}",body=body,headers={'Authorization':'Bearer '+os.environ['STATUS_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json','User-Agent':'cache-restore-independent-f'})
+          response=c.getresponse(); response.read(); request_id=response.getheader('x-github-request-id'); c.close()
+          out={'schema':'cache-restore-independent-consumer/v1','mode':os.environ['MODE'],'cache_hit_exact':os.environ.get('CACHE_HIT')=='true','cache_hit_sha256':h(os.environ.get('CACHE_HIT','').encode()),'action_outcome':os.environ.get('ACTION_OUTCOME'),'probes':rows,'regular_control_exact':rows['regular'].get('trusted') is True,'leaf_control_preserved':rows['leaf_existing'].get('deny') is True,'broken_controls_absent':not rows['broken_leaf'].get('present') and not rows['broken_parent'].get('present'),'outside_parent_overwritten':effect,'protected_decision_flipped':decision,'status':{'status':response.status,'state':'success' if decision else 'failure','request_id_sha256':h(str(request_id).encode())},'raw_paths_markers_tokens_retained':False}
+          print('CACHE_RESTORE_F_RESULT '+json.dumps(out,sort_keys=True,separators=(',',':')))
+          PY
+
