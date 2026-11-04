@@ -1,0 +1,30 @@
+name: Owner trusted cache producer F
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create owner regular files
+        env:
+          TRUSTED_B64: VFJVU1RFRC1GLTg4Y2E3NjM4ZDhiYzFjNGM2MTVhZjg0ZmI4ZTM1Yzk5ZmViZjU3OWE1NzZkM2JiNAo=
+        run: |
+          set -euo pipefail
+          root="$GITHUB_WORKSPACE/lower-data/cache-root"
+          for p in regular.txt leaf-existing.txt broken-leaf.txt parent-existing/policy.txt broken-parent/policy.txt; do
+            mkdir -p "$(dirname "$root/$p")"
+            printf '%s' "$TRUSTED_B64" | base64 -d > "$root/$p"
+          done
+      - name: Save owner cache
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: |
+            lower-data/cache-root/regular.txt
+            lower-data/cache-root/leaf-existing.txt
+            lower-data/cache-root/broken-leaf.txt
+            lower-data/cache-root/parent-existing/policy.txt
+            lower-data/cache-root/broken-parent/policy.txt
+          key: cache-f-e477c9f710e75e60cfc76a4d
